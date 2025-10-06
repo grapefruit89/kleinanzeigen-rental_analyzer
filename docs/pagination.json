@@ -1,0 +1,174 @@
+{
+  "version": "2025-10-06",
+  "purpose": "Pagination- und Navigationslogik für die Mietwohnungs-Suchergebnisse auf kleinanzeigen.de",
+  "context": {
+    "scope": "Suchergebnisseite (https://www.kleinanzeigen.de/s-wohnung-mieten/*)",
+    "max_pages": 50,
+    "reason_for_limit": "Kleinanzeigen zeigt serverseitig nie mehr als 50 Seiten (1250 Ergebnisse), auch wenn tausende Treffer existieren."
+  },
+  "core_concepts": {
+    "navigation_keys": {
+      "prev": "A",
+      "next": "D"
+    },
+    "cap_detection": {
+      "url": "Wenn '/seite:50/' in der URL vorkommt → Ende erreicht.",
+      "dom": "Wenn .pagination-next fehlt oder als <span> ohne data-url vorliegt → Ende erreicht.",
+      "sanity_check": "Wenn ein 'weiter'-Versuch dieselbe URL wie aktuell ergibt → Ende bestätigt."
+    },
+    "direction": {
+      "previous": "pagination-prev, href oder data-url",
+      "next": "pagination-next, href oder data-url"
+    },
+    "behaviour": {
+      "start_page": "Seite 1 kann ohne /seite:1 in der URL vorliegen.",
+      "end_page": "Seite 50 ist das absolute Maximum für jede Suche.",
+      "silent_fail": "Wenn kein gültiger Link → Navigation blockiert, Logmeldung."
+    }
+  },
+  "dom_structure": {
+    "root_container": "#srchrslt-pagination",
+    "nav_container": ".pagination-nav",
+    "page_links_container": ".pagination-pages",
+    "classes": {
+      "prev": ".pagination-prev",
+      "next": ".pagination-next",
+      "current": ".pagination-current",
+      "page": ".pagination-page",
+      "not_linked": ".pagination-not-linked"
+    },
+    "attributes": {
+      "data-url": "Pfad zur nächsten/vorherigen Seite (verwendet bei <span> statt <a>)",
+      "href": "Standardlink (wenn vorhanden)",
+      "aria-label": "Beinhaltet 'Nächste' oder 'Vorherige' für Barrierefreiheit",
+      "title": "Kann 'Zurück' oder 'Nächste' enthalten, falls aria-label fehlt"
+    },
+    "dynamic_behavior": {
+      "client_script": "Kleinanzeigen fügt JS-Handler hinzu: klick auf .pagination-not-linked öffnet data-url mit window.open()",
+      "implication": "Wir können denselben Mechanismus programmatisch nachbilden."
+    }
+  },
+  "selectors_and_fallbacks": {
+    "next": {
+      "priority": [
+        { "selector": ".pagination-next[href]", "desc": "Normaler <a>-Link mit href-Attribut" },
+        { "selector": ".pagination-next[data-url]", "desc": "Fallback für <span>-Variante mit data-url" },
+        { "selector": "[aria-label*='Nächste' i]", "desc": "ARIA-Fallback (robust gegen CSS-Änderungen)" },
+        { "selector": ".pagination-not-linked.pagination-next[data-url]", "desc": "JS-aktivierter Pseudo-Link" },
+        { "strategy": "heuristic", "desc": "Wenn kein DOM-Link gefunden → generiere URL mit currentPage+1" }
+      ],
+      "why": "Kleinanzeigen variiert Darstellung zwischen <a> und <span> mit JS; diese Reihenfolge deckt alle Varianten ab."
+    },
+    "previous": {
+      "priority": [
+        { "selector": ".pagination-prev[href]", "desc": "Standard-Link" },
+        { "selector": ".pagination-prev[data-url]", "desc": "JS-basierter Fallback" },
+        { "selector": "[aria-label*='Vorherige' i], [title*='Zurück' i]", "desc": "ARIA-/Titel-Fallback" },
+        { "strategy": "heuristic", "desc": "Berechne currentPage-1, falls kein DOM-Link vorhanden" }
+      ],
+      "why": "Auf Seite 1 fehlt der Link vollständig; Heuristik erzeugt dennoch eine gültige URL (zurück zu Start)."
+    },
+    "heuristics": {
+      "from_url": "Extrahiere 'seite:N' aus aktueller URL, Standardwert 1 wenn kein Match.",
+      "compose_url": "Ersetze 'seite:N' oder füge 'seite:N' vor das Kategoriensegment (z. B. c203) ein.",
+      "detect_category": "Erkenne '/c203' oder andere Kategorie aus URL, damit die Zusammensetzung korrekt bleibt.",
+      "normalize_path": "Entferne doppelte oder fehlende Slashes."
+    }
+  },
+  "url_logic": {
+    "parsing": {
+      "regex": "/seite:(\\d+)\\b",
+      "explanation": "Extrahiert die aktuelle Seitennummer aus URL-Pfaden."
+    },
+    "composition": {
+      "rules": [
+        "Wenn seite:N existiert → ersetze N.",
+        "Wenn keine seite:N existiert → füge /seite:N/ vor /c203 ein.",
+        "Falls kein Kategorie-Segment erkannt → hänge /seite:N ans Ende des Pfads an."
+      ],
+      "preserve": ["Query-Parameter", "URL-Hash"],
+      "reason": "Ermöglicht konsistente Navigation auch bei Suchfiltern oder Standortparametern."
+    },
+    "comparison": {
+      "method": "Vergleiche Normalisierte URL-Pfade ohne Trailing-Slashes",
+      "purpose": "Erkennung, ob ein Navigationsversuch zu derselben Seite führen würde."
+    }
+  },
+  "end_detection": {
+    "conditions": {
+      "dom_missing_next": "Kein Element .pagination-next (href, data-url oder aria-label) vorhanden.",
+      "url_at_cap": "Aktuelle URL enthält '/seite:50/' oder größer.",
+      "sanity_check": "composeUrlWithPage(N+1) == aktuelle URL → kein Fortschritt möglich.",
+      "server_redirect": "Navigation führt auf dieselbe Seite zurück (implizit erkannt durch sanity_check)."
+    },
+    "why_multiple_checks": "Manche Filter oder Regionen haben <30 Seiten, andere 50; DOM und URL zusammen sichern beides ab."
+  },
+  "integration": {
+    "key_listener": {
+      "event": "keydown",
+      "ignore": ["input", "textarea"],
+      "mapping": { "a": "goPrev()", "d": "goNext()" },
+      "blocked_if_end": "Wenn isAtEnd() == true → 'D' deaktiviert.",
+      "blocked_if_start": "Wenn isAtFirstPage() == true → 'A' deaktiviert."
+    },
+    "dashboard_support": {
+      "status_object": {
+        "page": "aktuelle Seitenzahl",
+        "atStart": "true/false",
+        "atEnd": "true/false",
+        "nextUrl": "berechnete Ziel-URL nach rechts",
+        "prevUrl": "berechnete Ziel-URL nach links"
+      },
+      "example": "Seite 10 / 50 im HUD anzeigen"
+    },
+    "console_logging": {
+      "info": "Navigation aktiv, oder Meldungen wie 'Ende erreicht – D ist tot'.",
+      "warn": "Fehler oder fehlende Links"
+    }
+  },
+  "robustness_and_fallbacks": {
+    "device_variants": {
+      "desktop": "nutzt meist <a href>",
+      "mobile": "nutzt meist <span data-url>",
+      "react_tests": "nutzen <button> + click-Handler (noch selten)",
+      "strategy": "Deshalb lieber ARIA-Text & data-url scannen statt Klassen hart zu erwarten."
+    },
+    "aria_text_fallback": {
+      "selector": "[aria-label*='Nächste' i], [aria-label*='Vorherige' i]",
+      "why": "ARIA-Attribute ändern sich kaum, selbst bei großen UI-Redesigns."
+    },
+    "title_text_fallback": {
+      "selector": "[title*='Zurück' i], [title*='Nächste' i]",
+      "why": "Sicher, falls ARIA entfernt wurde."
+    },
+    "numeric_extrapolation": {
+      "example": "Wenn .pagination-current = 7 und kein Next-Link existiert, berechne /seite:8/…",
+      "risk": "Funktioniert nur solange globalPageCap nicht erreicht ist."
+    },
+    "auto_mode_learning": {
+      "concept": "Das Skript kann merken, ob der aktuelle Pagination-Typ 'href' oder 'data-url' war, und bevorzugt diesen beim nächsten Seitenaufruf."
+    }
+  },
+  "extra_features": {
+    "progress_display": "Visuelle Fortschrittsanzeige basierend auf aktueller Seite / 50.",
+    "prefetch_next": "Optional: nächste Seite mit fetch() abrufen, um Ladezeit zu verkürzen (nur testweise).",
+    "coverage_calc": {
+      "from_breadcrumb": "Ergebnisse 1226–1250 von 90667 → 1.38% coverage",
+      "formula": "(end / total) * 100",
+      "purpose": "Schätzt den Anteil sichtbarer Ergebnisse an Gesamtangebot."
+    }
+  },
+  "performance": {
+    "cost": "Nahezu null; DOM-Checks und Regex laufen nur beim Tastendruck.",
+    "avoidance": "Keine MutationObserver, kein Scroll-Listener – minimalistisch.",
+    "safety": "window.open(url, '_self') blockiert, wenn Ziel == aktuelle URL (Ende)."
+  },
+  "testing_checklist": [
+    "Seite 1 → A deaktiviert, D aktiv.",
+    "Seite 10 → beide aktiv, Navigation springt korrekt.",
+    "Seite 50 → D deaktiviert.",
+    "Gefilterte Suche mit nur 3 Seiten → D deaktiviert ab 3/3.",
+    "Mobile Variante (data-url) → Navigation funktioniert via window.open().",
+    "A/D in Textfeldern → ignoriert."
+  ]
+}

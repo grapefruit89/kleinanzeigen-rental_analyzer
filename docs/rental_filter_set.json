@@ -1,0 +1,102 @@
+{
+  "version": "2025-10-06",
+  "module": "rental_filter_set.js",
+  "purpose": "Automatische Aktivierung des Standardfilters 'nur Angebote, kein Tausch' auf der Mietwohnungs-Hauptseite von Kleinanzeigen.",
+  "scope": {
+    "applies_to": "https://www.kleinanzeigen.de/s-wohnung-mieten/c203",
+    "category": "Mietwohnungen",
+    "domain": "www.kleinanzeigen.de"
+  },
+  "core_logic": {
+    "trigger_condition": "Wenn Benutzer auf der Vanilla-Mietwohnungsseite landet (keine Filter, keine /anzeige:-Parameter).",
+    "action": "Leite automatisch auf die gefilterte URL weiter, die nur Angebote ohne Tausch enthält.",
+    "target_url": "https://www.kleinanzeigen.de/s-wohnung-mieten/anzeige:angebote/c203+wohnung_mieten.swap_s:nein",
+    "detection_strategy": {
+      "url_pattern": "/s-wohnung-mieten/c203",
+      "breadcrumb_check": "Mietwohnungen",
+      "active_filter_pattern": "/anzeige:angebote/c203+wohnung_mieten.swap_s:nein"
+    }
+  },
+  "dom_references": {
+    "breadcrumb_leaf": ".breadcrump-leaf",
+    "breadcrumb_text_source": "div.breadcrump > h1 > span.breadcrump-leaf",
+    "category_container": "section .browsebox-section-body",
+    "ad_items_for_later_text_check": "article.aditem[data-adid]"
+  },
+  "filter_definition": {
+    "key": "s-wohnung-mieten",
+    "category_code": "c203",
+    "breadcrumb_must_contain": "Mietwohnungen",
+    "target_url": "https://www.kleinanzeigen.de/s-wohnung-mieten/anzeige:angebote/c203+wohnung_mieten.swap_s:nein",
+    "active_pattern": "anzeige:angebote/c203+wohnung_mieten.swap_s:nein"
+  },
+  "implemented_functions": {
+    "getBreadcrumbLeaf": "Liest den aktuellen Breadcrumb-Titel aus (z. B. 'Mietwohnungen').",
+    "isOnBaseRentalPage": "Erkennt, ob aktuelle URL die unveränderte Kategorie /s-wohnung-mieten/c203 ist.",
+    "isAlreadyFiltered": "Prüft anhand der active_pattern-Regex, ob Filter bereits aktiv sind.",
+    "ensureActive": "Hauptfunktion: prüft alle Bedingungen und leitet ggf. zur Filter-URL um."
+  },
+  "inactive_or_future_features": {
+    "markPotentialTradesOrRequests": {
+      "purpose": "Erkennung und optionale Markierung von Gesuchen oder Tauschangeboten im DOM.",
+      "status": "deaktiviert",
+      "reason_disabled": "Negationen wie 'kein Tausch' oder 'kein Gesuch' schwer zuverlässig zu erkennen.",
+      "future_plan": "Später kombinierbar mit NLP-/Regex-Logik zur Kontextauswertung."
+    },
+    "multi_category_support": {
+      "idea": "FILTER_SET als Objekt mit mehreren Kategorien (Wohnung mieten, Haus mieten, WG-Zimmer etc.).",
+      "status": "geplant",
+      "expansion_example": {
+        "s-haus-mieten": {
+          "category_code": "c202",
+          "breadcrumb_must_contain": "Haus mieten",
+          "target_url": "https://www.kleinanzeigen.de/s-haus-mieten/anzeige:angebote/c202+haus_mieten.swap_s:nein",
+          "active_pattern": "anzeige:angebote/c202+haus_mieten.swap_s:nein"
+        }
+      }
+    },
+    "inpage_content_check": {
+      "concept": "Suche nach Schlüsselwörtern 'gesuch' oder 'tausch' in .text-module-begin oder .aditem-main--middle--description.",
+      "note": "Aktuell deaktiviert, da Negationen und Mehrdeutigkeiten zu falschen Ergebnissen führen.",
+      "future_strategy": "Kombinierbar mit DOM-Kontext oder KI-Textklassifizierung."
+    }
+  },
+  "technical_considerations": {
+    "execution_timing": "@run-at document-idle (frühzeitig vor Dashboard-Initialisierung).",
+    "integration_order": {
+      "1": "rental_filter_set.js",
+      "2": "pagination.js",
+      "3": "selectorsrental.js",
+      "4": "dashboard main script"
+    },
+    "reason_for_first_position": "Redirect muss erfolgen, bevor andere Module DOM oder URLs analysieren.",
+    "redirect_method": "window.location.replace() – ersetzt History-Eintrag, verhindert Rücknavigation zur ungefilterten Seite.",
+    "logging": "Console.info() Meldungen zur Transparenz der Filteraktivierung."
+  },
+  "possible_expansions": {
+    "user_configurable_filters": "GM_setValue / GM_getValue zum Speichern eigener Filterpräferenzen pro Kategorie.",
+    "filter_visual_feedback": "Kleines Overlay oder Banner im Dashboard, das anzeigt, welche Filter aktiv sind.",
+    "error_handling": "Timeout-Erkennung, falls Breadcrumb oder DOM noch nicht geladen ist (z. B. Lazy Loading).",
+    "prefetch_detection": "Kombinierbar mit pagination.js, um sicherzustellen, dass auch Folge-Seiten Filter enthalten."
+  },
+  "example_usage": {
+    "header_import": "@require      https://deinequelle.de/rental_filter_set.js",
+    "call_sequence": [
+      "KARentalFilterSet.ensureActive();",
+      "KleinanzeigenOptimizer.init();"
+    ],
+    "result": "Falls ungefilterte Seite erkannt wird → automatische Weiterleitung auf gefilterte URL."
+  },
+  "testing_checklist": [
+    "Öffne /s-wohnung-mieten/c203 → Redirect erfolgt korrekt.",
+    "Öffne /s-wohnung-mieten/anzeige:angebote/c203+wohnung_mieten.swap_s:nein → keine Aktion.",
+    "Öffne andere Kategorie (z. B. /s-haus-mieten/c202) → keine Aktion.",
+    "Breadcrumb fehlt → kein Redirect (Failsafe).",
+    "Nach Redirect → Pagination.js & Selectors starten normal."
+  ],
+  "performance": {
+    "cost": "minimal (<1ms DOM-Zugriff, keine MutationObserver).",
+    "reliability": "100%, da statische URL-Muster und stabile Breadcrumb-Struktur.",
+    "side_effects": "Keine, Redirect ersetzt die Seite vollständig."
+  }
+}

@@ -1,0 +1,203 @@
+{
+  "version": "2025-10-06",
+  "purpose": "Robuste, redesign-feste Selektion und Extraktion von Wohnungsdaten auf kleinanzeigen.de via Tampermonkey – ohne Vollautomation, nur 'beim Browsen mitlernen'.",
+  "targets": {
+    "ad_root": {
+      "what": "Wrapper eines Angebots",
+      "primary": ["article[data-adid]"],
+      "secondary": ["article.aditem", "[data-adid]"],
+      "why": "data-adid ist meist stabil; article kapselt eine Anzeige."
+    },
+    "title": {
+      "what": "Anzeigentitel (nur für Anzeige, nicht für Zahlenextraktion)",
+      "primary": [".text-module-begin"],
+      "secondary": ["h2 a[href*='/s-anzeige/']"],
+      "why": "Titel dient als Negativzone für Zahlen (m²/€)."
+    },
+    "description": {
+      "what": "Kurzbeschreibung (Negativzone für Zahlen)",
+      "primary": [".aditem-main--middle--description"],
+      "secondary": ["[class*='description']", "p:near(title)"],
+      "why": "Fließtext enthält oft irrelevante Zahlen → ausschließen."
+    },
+    "meta_row": {
+      "what": "Zeile mit Merkmalen (m², Zimmer, Extras)",
+      "primary": [".aditem-main--bottom p", ".aditem-main--bottom"],
+      "secondary": ["[class*='bottom'] p", "article [class*='simpletag']"],
+      "why": "Hier erscheinen technisch die kompakten Tags."
+    },
+    "area_m2": {
+      "what": "Wohnfläche in m²",
+      "primary": [".aditem-main--bottom span.simpletag"],
+      "secondary": ["[aria-label*='Quadratmeter']", "[aria-label*='m²']"],
+      "tertiary_text_scan": {
+        "query_scope": "span, p",
+        "regex": "(^|\\s)([\\d.,]{1,6})\\s*m²(\\s|$)",
+        "negative_zones": ["title", "description"]
+      },
+      "plausibility": { "min": 5, "max": 1000, "prefer_range": [20, 300] },
+      "why": "m² steht meist als Tag; ARIA als stabiler Alternativanker; Textscan als letzter Notnagel."
+    },
+    "rooms": {
+      "what": "Zimmeranzahl",
+      "primary": [".aditem-main--bottom span.simpletag"],
+      "secondary": ["[aria-label*='Zimmer']"],
+      "tertiary_text_scan": {
+        "query_scope": "span, p",
+        "regex": "(^|\\s)([\\d.,]{1,2})\\s*Zi\\.?($|\\s)"
+      },
+      "plausibility": { "min": 1, "max": 12 },
+      "why": "Analog zu m²; Zimmer steht fast immer im gleichen Tag-Cluster."
+    },
+    "price_eur": {
+      "what": "Mietpreis (€ / Monat, primär Kalt/Warm ohne Feinsinn)",
+      "primary": [".aditem-main--middle--price-shipping--price"],
+      "secondary": ["[aria-label*='Preis']", "[class*='price']"],
+      "tertiary_text_scan": {
+        "query_scope": "span, p, strong",
+        "regex": "([\\d.,]{1,7})\\s*€(?!\\w)"
+      },
+      "plausibility": {
+        "hard_min": 50,
+        "hard_max": 20000,
+        "soft_prefer": [250, 3000]
+      },
+      "why": "Preisblock ist optisch stabil; ARIA/Teilstring sichern gegen CSS-Änderungen; Regex vermeidet '€VBtext'."
+    },
+    "location_plz_city": {
+      "what": "PLZ und Ort",
+      "primary": ["[aria-label*='Ort']", "[aria-label*='PLZ']"],
+      "secondary": ["[class*='location']", "a[href*='ort-']"],
+      "tertiary_text_scan": {
+        "query_scope": "span, p",
+        "regex": "(\\b\\d{5}\\b)\\s+([\\p{L} .-]{2,})"
+      },
+      "why": "Benötigt fürs regionale Lernen; ARIA first, sonst Textmuster."
+    },
+    "datetime": {
+      "what": "Datum/Uhrzeit der Anzeige",
+      "primary": ["time[datetime]"],
+      "secondary": ["[aria-label*='Heute']", "[aria-label*='Gestern']", "[class*='date']"],
+      "why": "time[datetime] ist semantisch; ansonsten deutschsprachige ARIA-Labels."
+    }
+  },
+  "selection_strategy": {
+    "priority_order": ["aria_or_data", "structural", "text_regex"],
+    "explanations": {
+      "aria_or_data": "Barrierefreiheits-/data-Attribute sind langfristig stabil.",
+      "structural": "DOM-Hierarchie ändert sich seltener als Klassennamen.",
+      "text_regex": "Letzte Rettung, kombiniert mit Negativzonen und Heuristik."
+    },
+    "negative_zones": {
+      "concept": "Zahlen in Titel/Beschreibung ignorieren (Fließtext).",
+      "selectors": {
+        "title": [".text-module-begin"],
+        "description": [".aditem-main--middle--description", "[class*='description']"]
+      },
+      "fallback_if_redesign": {
+        "heuristics": [
+          "Wenn Container-Textlänge > 80 Zeichen → als Fließtext behandeln",
+          "Wenn mehr als 2 Satzzeichen vorkommen → Fließtext"
+        ]
+      }
+    }
+  },
+  "heuristics": {
+    "standalone_text": {
+      "max_chars_area": 20,
+      "max_chars_price": 20,
+      "disallow_after_unit_letters": true,
+      "disqualify_if_many_punct": true,
+      "explanation": "Echte m²/€-Tags sind kurz und stehen 'allein'."
+    },
+    "regex_library": {
+      "area": "(^|\\s)([\\d.,]{1,6})\\s*m²(\\s|$)",
+      "rooms": "(^|\\s)([\\d.,]{1,2})\\s*Zi\\.?($|\\s)",
+      "price": "([\\d.,]{1,7})\\s*€(?!\\w)",
+      "plz_city": "(\\b\\d{5}\\b)\\s+([\\p{L} .-]{2,})"
+    },
+    "normalization": {
+      "decimal": { "from": ",", "to": "." },
+      "thousands": { "remove": "." },
+      "strip": ["€", "m²", "Zi", "VB", "kalt", "warm", "zzgl.", "inkl."]
+    }
+  },
+  "plausibility_checks": {
+    "area_m2": { "min": 5, "max": 1000 },
+    "rooms": { "min": 1, "max": 12 },
+    "price_eur": { "hard_min": 50, "hard_max": 20000, "soft_prefer": [250, 3000] },
+    "title_desc_exclusion": true,
+    "why": "Verhindert Fehlgriffe aus Fließtext und irreale Ausreißer."
+  },
+  "scoring": {
+    "idea": "Gewichtete Entscheidung statt harter Ja/Nein-Filter.",
+    "rules": [
+      { "if": "looks_like_standalone(text)", "score": 1 },
+      { "if": "passes_plausibility(value, kind)", "score": 1 },
+      { "if": "container_is_not_long_paragraph", "score": 1 }
+    ],
+    "threshold_accept": 2,
+    "pseudocode": "score=0; if(standalone) score++; if(plausible) score++; if(not_long_para) score++; accept_if(score>=2);",
+    "why": "Überlebt Redesigns, ohne massenhaft falsche Treffer."
+  },
+  "adaptive_learning": {
+    "goal": "Selektoren, die erfolgreich waren, bevorzugen und speichern.",
+    "state_keys": {
+      "activeSelectors": "ka_active_selectors",
+      "statsByRegion": "ka_stats_plz_prefix"
+    },
+    "logic": [
+      "Pro Ziel (m²/€/Zi) gibt es eine Prioritätenliste von Selektoren.",
+      "Wenn nur ein Fallback erfolgreich ist: DOM-Pfad ermitteln und nach vorne ziehen.",
+      "Persistieren via GM_setValue/GM_getValue (oder localStorage als Fallback)."
+    ],
+    "dom_path_capture": "TagName#id.class1.class2 > ... (verkürzt, keine Indexe, um Robustheit zu behalten)"
+  },
+  "mutation_handling": {
+    "observer": "MutationObserver auf den Container mit den Anzeigen.",
+    "trigger": "Bei Kindeinfügungen → nur neue <article[data-adid]> verarbeiten.",
+    "why": "Infinite Scroll / AJAX-Updates mitbekommen, ohne doppelt zu zählen."
+  },
+  "pagination_navigation": {
+    "hotkeys": { "prev": "A", "next": "D" },
+    "primary": ["a.pagination-prev", "a.pagination-next"],
+    "secondary_text_based": [
+      "a: textContent=='Zurück' | 'Vorherige'",
+      "a: textContent=='Nächste' | 'Weiter'"
+    ],
+    "note": "Kleinanzeigen zeigt 10er Fenster; Navigation selbst ist robust, auch wenn Links/IDs wechseln.",
+    "why": "Benutzerfreundliche, robuste A/D-Navigation unabhängig von Klassennamen."
+  },
+  "performance": {
+    "dom_queries": "Bevorzugt querySelector(All) mit kleinen Scopes (pro Anzeige).",
+    "text_scan": "Nur wenn Primär/Sekundär fehlschlagen.",
+    "cost_estimate": "<< 2ms pro Anzeige auf modernen Browsern.",
+    "micro_optimizations": [
+      "Caches pro Anzeige (einmal sammeln, mehrfach filtern).",
+      "Früher Abbruch, sobald ein valider Kandidat gefunden wurde."
+    ]
+  },
+  "storage": {
+    "engine": ["GM_setValue/GM_getValue", "localStorage (Fallback)"],
+    "what_to_store": [
+      "adaptive activeSelectors",
+      "regionale Stats (PLZ-Präfix: IQR, Median, Count)",
+      "letzte Extraktionszeitpunkte (Debounce gegen Doppelerfassung)"
+    ]
+  },
+  "error_handling": {
+    "strategy": [
+      "Try/Catch pro Anzeige, niemals global abbrechen.",
+      "Warn-Log bei Plausibilitätsfail (kein Hard Error).",
+      "Automatischer Rückfall auf Heuristik-Scan, wenn selektorbasierte Pfade leerlaufen."
+    ]
+  },
+  "testing_checklist": [
+    "Seite mit zahlenreichem Beschreibungstext → Zahlen dürfen NICHT übernommen werden.",
+    "Anzeigen mit 'VB', 'inkl./zzgl.' → Preis korrekt normalisieren.",
+    "Extremwerte (5 m² / 900 m² / 15.000 €) → Plausibilität greift.",
+    "Redesign-Simulation: Klassen entfernen → ARIA/Heuristik fängt es.",
+    "MutationObserver: Nachladen erzeugt keine Doppelzählung.",
+    "A/D-Navigation: Ohne sichtbaren Next/Prev-Link kein Key-Trigger."
+  ]
+}
